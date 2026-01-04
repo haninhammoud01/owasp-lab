@@ -1,0 +1,97 @@
+rules:
+  - id: sql-injection-concatenation
+    patterns:
+      - pattern: |
+          pool.query("... " + $VAR + " ...")
+      - pattern: |
+          pool.query(`... ${$VAR} ...`)
+    message: |
+      Potential SQL injection detected. Use parameterized queries instead.
+      Replace string concatenation with placeholders ($1, $2, etc).
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+      owasp: "A03:2021 - Injection"
+      
+  - id: hardcoded-credentials
+    patterns:
+      - pattern: |
+          const password = "..."
+      - pattern: |
+          const secret = "..."
+      - pattern: |
+          const apiKey = "..."
+    message: |
+      Hardcoded credentials detected. Use environment variables instead.
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+      
+  - id: insecure-random
+    patterns:
+      - pattern: Math.random()
+    message: |
+      Math.random() is not cryptographically secure.
+      Use crypto.randomBytes() or crypto.randomUUID() instead.
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-338: Use of Cryptographically Weak PRNG"
+      
+  - id: eval-usage
+    patterns:
+      - pattern: eval(...)
+      - pattern: Function(...)
+    message: |
+      Usage of eval() or Function() constructor detected.
+      This can lead to code injection vulnerabilities.
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code"
+      
+  - id: weak-crypto
+    patterns:
+      - pattern: crypto.createHash("md5")
+      - pattern: crypto.createHash("sha1")
+    message: |
+      Weak cryptographic algorithm detected (MD5 or SHA1).
+      Use SHA-256 or stronger algorithms.
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-327: Use of a Broken or Risky Cryptographic Algorithm"
+      
+  - id: reflected-xss
+    patterns:
+      - pattern: res.send("..." + $VAR + "...")
+      - pattern: res.send(`... ${$VAR} ...`)
+    message: |
+      Potential reflected XSS vulnerability.
+      Sanitize user input before rendering in HTML.
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-79: Cross-site Scripting"
+      owasp: "A03:2021 - Injection"
+      
+  - id: command-injection
+    patterns:
+      - pattern: exec($VAR)
+      - pattern: spawn($VAR)
+    message: |
+      Potential command injection vulnerability.
+      Validate and sanitize input before passing to system commands.
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-78: OS Command Injection"

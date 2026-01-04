@@ -1,0 +1,569 @@
+rules:
+  - id: express-sql-injection-string-concat
+    patterns:
+      - pattern-either:
+          - pattern: |
+              pool.query("..." + $VAR + "...")
+          - pattern: |
+              pool.query(`... ${$VAR} ...`)
+          - pattern: |
+              db.query("..." + $VAR + "...")
+          - pattern: |
+              db.query(`... ${$VAR} ...`)
+          - pattern: |
+              connection.query("..." + $VAR + "...")
+          - pattern: |
+              connection.query(`... ${$VAR} ...`)
+      - pattern-not: |
+          pool.query("...", [...])
+      - pattern-not: |
+          pool.query("...", $PARAMS)
+    message: |
+      Potential SQL injection vulnerability detected.
+      
+      String concatenation in SQL queries allows attackers to inject malicious SQL code.
+      
+      Vulnerable pattern:
+        const query = `SELECT * FROM users WHERE id = ${userId}`;
+        pool.query(query);
+      
+      Secure alternative:
+        const query = 'SELECT * FROM users WHERE id = $1';
+        pool.query(query, [userId]);
+      
+      Using parameterized queries prevents SQL injection by separating SQL logic from data.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+      owasp: "A03:2021 - Injection"
+      confidence: HIGH
+      likelihood: HIGH
+      impact: HIGH
+      subcategory: [vuln]
+      references:
+        - https://owasp.org/www-community/attacks/SQL_Injection
+        - https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+
+  - id: express-sequelize-raw-query-injection
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $MODEL.sequelize.query("..." + $VAR + "...")
+          - pattern: |
+              $MODEL.sequelize.query(`... ${$VAR} ...`)
+          - pattern: |
+              sequelize.query("..." + $VAR + "...")
+          - pattern: |
+              sequelize.query(`... ${$VAR} ...`)
+      - pattern-not: |
+          $MODEL.sequelize.query("...", { replacements: [...] })
+      - pattern-not: |
+          sequelize.query("...", { replacements: [...] })
+    message: |
+      Sequelize raw query with string interpolation detected.
+      
+      Use replacements or bind parameters instead:
+        sequelize.query(
+          'SELECT * FROM users WHERE id = :id',
+          { replacements: { id: userId } }
+        );
+      
+      Or use Sequelize query builders which automatically parameterize.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-89: SQL Injection"
+      owasp: "A03:2021 - Injection"
+
+  - id: reflected-xss-res-send
+    patterns:
+      - pattern-either:
+          - pattern: |
+              res.send("..." + $VAR + "...")
+          - pattern: |
+              res.send(`... ${$VAR} ...`)
+          - pattern: |
+              res.write("..." + $VAR + "...")
+          - pattern: |
+              res.write(`... ${$VAR} ...`)
+      - pattern-inside: |
+          $ROUTE(..., function(..., $REQ, $RES) {
+            ...
+          })
+      - metavariable-pattern:
+          metavariable: $VAR
+          patterns:
+            - pattern-either:
+                - pattern: $REQ.query.$FIELD
+                - pattern: $REQ.params.$FIELD
+                - pattern: $REQ.body.$FIELD
+    message: |
+      Reflected XSS vulnerability: user input rendered without sanitization.
+      
+      User-controlled data from request (query, params, body) is directly 
+      embedded in HTML response without proper escaping.
+      
+      Mitigation options:
+      1. Use template engine with auto-escaping (Pug, EJS with proper config)
+      2. Sanitize with DOMPurify or similar
+      3. Set Content-Security-Policy headers
+      4. Encode output based on context (HTML, JS, URL)
+      
+      Example fix:
+        const DOMPurify = require('isomorphic-dompurify');
+        const clean = DOMPurify.sanitize(userInput);
+        res.send(clean);
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-79: Cross-site Scripting"
+      owasp: "A03:2021 - Injection"
+      
+  - id: jwt-secret-hardcoded
+    patterns:
+      - pattern-either:
+          - pattern: jwt.sign(..., "...", ...)
+          - pattern: jwt.verify(..., "...", ...)
+      - pattern-not: jwt.sign(..., process.env.$SECRET, ...)
+      - pattern-not: jwt.verify(..., process.env.$SECRET, ...)
+    message: |
+      Hardcoded JWT secret detected.
+      
+      JWT secrets should be stored securely in environment variables, not in code.
+      A compromised secret allows attackers to forge valid tokens.
+      
+      Secure approach:
+        const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
+      
+      Additional best practices:
+      - Use strong, random secrets (32+ characters)
+      - Rotate secrets periodically
+      - Use different secrets for different environments
+      - Consider asymmetric keys (RS256) for public verification
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-798: Hard-coded Credentials"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+
+  - id: bcrypt-low-rounds
+    patterns:
+      - pattern-either:
+          - pattern: bcrypt.hash($PASS, $ROUNDS)
+          - pattern: bcrypt.hashSync($PASS, $ROUNDS)
+      - metavariable-comparison:
+          metavariable: $ROUNDS
+          comparison: $ROUNDS < 10
+    message: |
+      Bcrypt rounds too low. Using fewer than 10 rounds makes passwords 
+      vulnerable to brute-force attacks.
+      
+      Recommended: 12-14 rounds for production systems.
+      
+      Current best practice (2025):
+        const hash = await bcrypt.hash(password, 12);
+      
+      Note: Higher rounds = more CPU time = better security but slower response.
+      Balance based on your threat model and performance requirements.
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-916: Weak Password Requirements"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+
+  - id: missing-rate-limit-auth-endpoint
+    patterns:
+      - pattern: |
+          $APP.$METHOD('/login', ..., function(...) { ... })
+      - pattern-not-inside: |
+          $APP.use('/login', $LIMITER)
+      - pattern-not-inside: |
+          $APP.$METHOD('/login', $LIMITER, ...)
+    message: |
+      Authentication endpoint without rate limiting detected.
+      
+      Login endpoints are prime targets for brute-force attacks.
+      Implement rate limiting to prevent credential stuffing.
+      
+      Implementation:
+        const rateLimit = require('express-rate-limit');
+        
+        const loginLimiter = rateLimit({
+          windowMs: 15 * 60 * 1000,
+          max: 5,
+          message: 'Too many login attempts, please try again later'
+        });
+        
+        app.post('/login', loginLimiter, authController.login);
+      
+      Additional protections:
+      - Account lockout after N failed attempts
+      - CAPTCHA after multiple failures
+      - Monitor for distributed attacks
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-307: Improper Restriction of Excessive Authentication Attempts"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+
+  - id: express-no-helmet
+    patterns:
+      - pattern: |
+          const $APP = express()
+      - pattern-not-inside: |
+          $APP.use(helmet(...))
+      - pattern-not-inside: |
+          $APP.use(helmet())
+    message: |
+      Express app created without Helmet security middleware.
+      
+      Helmet sets important security headers:
+      - X-Content-Type-Options: nosniff
+      - X-Frame-Options: DENY
+      - Strict-Transport-Security
+      - Content-Security-Policy
+      - X-XSS-Protection
+      
+      Implementation:
+        const helmet = require('helmet');
+        app.use(helmet());
+      
+      For production, configure CSP explicitly:
+        app.use(helmet({
+          contentSecurityPolicy: {
+            directives: {
+              defaultSrc: ["'self'"],
+              scriptSrc: ["'self'", "'unsafe-inline'"],
+            }
+          }
+        }));
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-1021: Improper Restriction of Rendered UI Layers"
+      owasp: "A05:2021 - Security Misconfiguration"
+
+  - id: weak-crypto-algorithm
+    patterns:
+      - pattern-either:
+          - pattern: crypto.createHash("md5")
+          - pattern: crypto.createHash("sha1")
+          - pattern: crypto.createCipher("des", ...)
+          - pattern: crypto.createCipher("rc4", ...)
+    message: |
+      Weak cryptographic algorithm detected.
+      
+      These algorithms are cryptographically broken and should not be used:
+      - MD5: Collision attacks possible
+      - SHA1: Deprecated by most standards
+      - DES: Key size too small
+      - RC4: Known biases in keystream
+      
+      Use instead:
+        For hashing: SHA-256, SHA-384, SHA-512
+        For encryption: AES-256-GCM
+      
+      Example:
+        const hash = crypto.createHash('sha256').update(data).digest('hex');
+        
+        const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-327: Use of Broken Cryptographic Algorithm"
+      owasp: "A02:2021 - Cryptographic Failures"
+
+  - id: insecure-random-for-security
+    patterns:
+      - pattern-either:
+          - pattern: Math.random()
+          - pattern: Math.floor(Math.random() * ...)
+      - pattern-inside: |
+          function $FUNC(...) {
+            ...
+          }
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: .*(token|secret|key|password|salt|nonce|session).*
+    message: |
+      Math.random() used in security-sensitive context.
+      
+      Math.random() is NOT cryptographically secure and should never be used for:
+      - Tokens
+      - Session IDs
+      - Passwords
+      - Cryptographic keys
+      - Security nonces
+      
+      Use crypto.randomBytes() instead:
+        const crypto = require('crypto');
+        const token = crypto.randomBytes(32).toString('hex');
+        
+        Or for UUIDs:
+        const uuid = crypto.randomUUID();
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-338: Use of Cryptographically Weak PRNG"
+      owasp: "A02:2021 - Cryptographic Failures"
+
+  - id: command-injection-exec
+    patterns:
+      - pattern-either:
+          - pattern: |
+              exec("..." + $VAR + "...")
+          - pattern: |
+              exec(`... ${$VAR} ...`)
+          - pattern: |
+              execSync("..." + $VAR + "...")
+          - pattern: |
+              execSync(`... ${$VAR} ...`)
+      - metavariable-pattern:
+          metavariable: $VAR
+          patterns:
+            - pattern-either:
+                - pattern: $REQ.query.$FIELD
+                - pattern: $REQ.params.$FIELD
+                - pattern: $REQ.body.$FIELD
+    message: |
+      Command injection vulnerability: user input in shell command.
+      
+      Executing shell commands with user-controlled input allows attackers 
+      to run arbitrary system commands.
+      
+      Attack example:
+        userInput = "; rm -rf /"
+        exec(`ls ${userInput}`)  // Disaster!
+      
+      Mitigation strategies:
+      1. Avoid shell execution entirely
+      2. Use libraries with safe APIs (e.g., fs for file operations)
+      3. If shell needed: validate input strictly against whitelist
+      4. Use execFile() with array arguments (no shell interpolation)
+      
+      Safe alternative:
+        const { execFile } = require('child_process');
+        execFile('ls', ['-la', directory], callback);
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-78: OS Command Injection"
+      owasp: "A03:2021 - Injection"
+
+  - id: path-traversal-file-access
+    patterns:
+      - pattern-either:
+          - pattern: fs.readFile($REQ.query.$FIELD, ...)
+          - pattern: fs.readFile($REQ.params.$FIELD, ...)
+          - pattern: fs.readFileSync($REQ.query.$FIELD, ...)
+          - pattern: fs.readFileSync($REQ.params.$FIELD, ...)
+          - pattern: fs.readFile("..." + $REQ.query.$FIELD + "...", ...)
+          - pattern: fs.readFile(`... ${$REQ.query.$FIELD} ...`, ...)
+      - pattern-not-inside: |
+          if (path.normalize($PATH).startsWith(...)) { ... }
+      - pattern-not-inside: |
+          if (path.resolve($PATH).startsWith(...)) { ... }
+    message: |
+      Path traversal vulnerability: unsanitized user input in file path.
+      
+      Attackers can use "../" sequences to access files outside intended directory.
+      
+      Attack example:
+        GET /download?file=../../../../etc/passwd
+      
+      Secure implementation:
+        const path = require('path');
+        
+        const baseDir = '/var/www/uploads';
+        const filename = req.query.file;
+        const fullPath = path.join(baseDir, filename);
+        
+        if (!fullPath.startsWith(path.resolve(baseDir))) {
+          return res.status(403).send('Access denied');
+        }
+        
+        fs.readFile(fullPath, callback);
+      
+      Best practices:
+      - Validate against whitelist of allowed files
+      - Use file IDs instead of filenames
+      - Store uploads outside web root
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-22: Path Traversal"
+      owasp: "A01:2021 - Broken Access Control"
+
+  - id: sensitive-data-in-console-log
+    patterns:
+      - pattern-either:
+          - pattern: console.log(..., $VAR, ...)
+          - pattern: console.error(..., $VAR, ...)
+          - pattern: console.info(..., $VAR, ...)
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: .*(password|token|secret|key|credential|auth|jwt|apikey|api_key).*
+    message: |
+      Sensitive data logged to console.
+      
+      Logging sensitive information can lead to:
+      - Credentials exposed in log files
+      - Secrets in monitoring systems
+      - Data leaks in centralized logging
+      
+      Found in variable names suggesting sensitive data.
+      
+      Best practices:
+      - Never log passwords, tokens, or keys
+      - Use structured logging with sanitization
+      - Redact sensitive fields before logging
+      
+      Example safe logging:
+        const sanitized = { ...user };
+        delete sanitized.password;
+        delete sanitized.token;
+        logger.info('User action', sanitized);
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-532: Information Exposure Through Log Files"
+      owasp: "A04:2021 - Insecure Design"
+
+  - id: cors-allow-all-origins
+    patterns:
+      - pattern-either:
+          - pattern: |
+              cors({ origin: "*" })
+          - pattern: |
+              cors({ origin: true })
+          - pattern: |
+              res.setHeader("Access-Control-Allow-Origin", "*")
+    message: |
+      CORS configured to allow all origins.
+      
+      Allowing all origins (*) exposes your API to Cross-Site Request Forgery 
+      and allows any website to make requests to your API.
+      
+      Secure configuration:
+        const corsOptions = {
+          origin: process.env.ALLOWED_ORIGINS.split(','),
+          credentials: true,
+          optionsSuccessStatus: 200
+        };
+        
+        app.use(cors(corsOptions));
+      
+      Or validate origin dynamically:
+        const corsOptions = {
+          origin: function (origin, callback) {
+            const whitelist = ['https://yourapp.com', 'https://admin.yourapp.com'];
+            if (whitelist.indexOf(origin) !== -1 || !origin) {
+              callback(null, true);
+            } else {
+              callback(new Error('Not allowed by CORS'));
+            }
+          }
+        };
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-942: Permissive CORS Policy"
+      owasp: "A05:2021 - Security Misconfiguration"
+
+  - id: regex-dos-vulnerability
+    patterns:
+      - pattern: |
+          new RegExp($PATTERN)
+      - metavariable-regex:
+          metavariable: $PATTERN
+          regex: .*\(\.\*\)\+.*|.*\(\.\+\)\+.*|.*\(\w\*\)\+.*
+    message: |
+      Potential Regular Expression Denial of Service (ReDoS).
+      
+      Regex patterns with nested quantifiers can cause exponential time complexity
+      leading to CPU exhaustion when processing malicious input.
+      
+      Vulnerable patterns:
+        (.*)+
+        (a+)+
+        (a*)*
+        (a|a)*
+      
+      Mitigation:
+      1. Avoid nested quantifiers
+      2. Use atomic groups where supported
+      3. Set regex timeout limits
+      4. Validate input length before regex matching
+      
+      Safe alternatives:
+        Instead of: /^(a+)+$/
+        Use: /^a+$/
+        
+        Instead of: /^(.*)*$/
+        Use: /^.*$/
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-1333: Inefficient Regular Expression Complexity"
+      owasp: "A06:2021 - Vulnerable and Outdated Components"
+
+  - id: prototype-pollution-merge
+    patterns:
+      - pattern-either:
+          - pattern: Object.assign($TARGET, $REQ.body)
+          - pattern: Object.assign($TARGET, $REQ.query)
+          - pattern: |
+              { ...$REQ.body }
+          - pattern: |
+              { ...$REQ.query }
+          - pattern: lodash.merge($TARGET, $REQ.body)
+          - pattern: _.merge($TARGET, $REQ.body)
+    message: |
+      Potential prototype pollution vulnerability.
+      
+      Merging user input directly into objects can allow attackers to modify
+      Object.prototype, affecting all objects in the application.
+      
+      Attack payload:
+        {
+          "__proto__": {
+            "isAdmin": true
+          }
+        }
+      
+      Mitigation:
+      1. Validate and whitelist allowed properties
+      2. Use Object.create(null) for objects used with user data
+      3. Freeze prototypes in sensitive contexts
+      4. Use libraries with pollution protection
+      
+      Safe approach:
+        const allowedFields = ['name', 'email', 'age'];
+        const sanitized = {};
+        allowedFields.forEach(field => {
+          if (req.body[field] !== undefined) {
+            sanitized[field] = req.body[field];
+          }
+        });
+        Object.assign(target, sanitized);
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-1321: Prototype Pollution"
+      owasp: "A08:2021 - Software and Data Integrity Failures"

@@ -1,0 +1,456 @@
+rules:
+  - id: express-missing-input-validation
+    patterns:
+      - pattern: |
+          $APP.$METHOD($PATH, async function($REQ, $RES) {
+            ...
+            const $VAR = $REQ.body.$FIELD
+            ...
+          })
+      - pattern-not-inside: |
+          $APP.$METHOD($PATH, [
+            ...,
+            body($STR).isLength(...),
+            ...,
+          ], ...)
+      - pattern-not-inside: |
+          if ($REQ.body.$FIELD === undefined) { ... }
+      - pattern-not-inside: |
+          if (!$REQ.body.$FIELD) { ... }
+    message: |
+      Route handler accesses request body without validation.
+      
+      Every user input should be validated before processing.
+      Use express-validator or similar library.
+      
+      Secure pattern:
+        const { body, validationResult } = require('express-validator');
+        
+        app.post('/user',
+          body('username').isLength({ min: 3, max: 50 }),
+          body('email').isEmail(),
+          body('age').optional().isInt({ min: 0, max: 150 }),
+          async (req, res) => {
+            const errors = validationResult(req);
+            if (!errors.isEmpty()) {
+              return res.status(400).json({ errors: errors.array() });
+            }
+            // Safe to use req.body here
+          }
+        );
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-20: Improper Input Validation"
+
+  - id: jwt-verify-no-error-handling
+    patterns:
+      - pattern: |
+          jwt.verify($TOKEN, $SECRET)
+      - pattern-not-inside: |
+          try {
+            ...
+            jwt.verify($TOKEN, $SECRET)
+            ...
+          } catch (...) {
+            ...
+          }
+      - pattern-not-inside: |
+          jwt.verify($TOKEN, $SECRET, function($ERR, ...) {
+            ...
+          })
+    message: |
+      JWT verification without error handling.
+      
+      jwt.verify() can throw errors for:
+      - Expired tokens
+      - Invalid signatures
+      - Malformed tokens
+      
+      Unhandled errors can crash the application or leak information.
+      
+      Secure pattern:
+        try {
+          const decoded = jwt.verify(token, process.env.JWT_SECRET);
+          // Token is valid, proceed
+        } catch (err) {
+          if (err.name === 'TokenExpiredError') {
+            return res.status(401).json({ error: 'Token expired' });
+          }
+          if (err.name === 'JsonWebTokenError') {
+            return res.status(401).json({ error: 'Invalid token' });
+          }
+          return res.status(500).json({ error: 'Authentication error' });
+        }
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-755: Improper Handling of Exceptional Conditions"
+
+  - id: database-connection-credentials-exposed
+    patterns:
+      - pattern-either:
+          - pattern: |
+              new Pool({
+                ...,
+                password: "...",
+                ...
+              })
+          - pattern: |
+              createConnection({
+                ...,
+                password: "...",
+                ...
+              })
+          - pattern: |
+              mongoose.connect("mongodb://...password...")
+      - pattern-not: |
+          new Pool({
+            ...,
+            password: process.env.$VAR,
+            ...
+          })
+    message: |
+      Database credentials hardcoded in source code.
+      
+      Hardcoded credentials pose several risks:
+      - Exposed in version control history
+      - Visible to anyone with code access
+      - Difficult to rotate
+      - Same credentials across environments
+      
+      Use environment variables:
+        const pool = new Pool({
+          host: process.env.DB_HOST,
+          port: process.env.DB_PORT,
+          database: process.env.DB_NAME,
+          user: process.env.DB_USER,
+          password: process.env.DB_PASSWORD
+        });
+      
+      Or use connection string:
+        const pool = new Pool({
+          connectionString: process.env.DATABASE_URL
+        });
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-798: Hard-coded Credentials"
+
+  - id: authorization-check-missing
+    mode: taint
+    pattern-sources:
+      - pattern: $REQ.params.userId
+      - pattern: $REQ.query.userId
+      - pattern: $REQ.body.userId
+    pattern-sinks:
+      - patterns:
+          - pattern: |
+              await $MODEL.findByPk($USERID)
+          - pattern-not-inside: |
+              if ($REQ.user.id === $USERID) { ... }
+          - pattern-not-inside: |
+              if ($REQ.user.id !== $USERID) { return ... }
+          - pattern-not-inside: |
+              if ($REQ.user.role === "admin") { ... }
+    message: |
+      Insecure Direct Object Reference (IDOR) detected.
+      
+      User-controlled ID used to access resource without authorization check.
+      Any user could access other users' data by changing the ID parameter.
+      
+      Attack example:
+        GET /api/users/123/profile
+        Change to: GET /api/users/456/profile
+      
+      Add authorization check:
+        app.get('/api/users/:userId/profile', authMiddleware, async (req, res) => {
+          const requestedUserId = req.params.userId;
+          const currentUserId = req.user.id;
+          
+          if (requestedUserId !== currentUserId && req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Access denied' });
+          }
+          
+          const user = await User.findByPk(requestedUserId);
+          res.json(user);
+        });
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-639: Insecure Direct Object References"
+      owasp: "A01:2021 - Broken Access Control"
+
+  - id: mass-assignment-vulnerability
+    patterns:
+      - pattern-either:
+          - pattern: |
+              await $MODEL.create($REQ.body)
+          - pattern: |
+              await $MODEL.update($REQ.body, ...)
+          - pattern: |
+              new $MODEL($REQ.body)
+      - pattern-not-inside: |
+          const { $FIELD1, $FIELD2, ... } = $REQ.body
+    message: |
+      Mass assignment vulnerability: entire request body passed to model.
+      
+      Attackers can inject unexpected fields (e.g., isAdmin, role, balance)
+      if the model accepts them.
+      
+      Attack example:
+        POST /api/users
+        {
+          "username": "hacker",
+          "email": "hacker@evil.com",
+          "role": "admin"     // Injected field!
+        }
+      
+      Mitigation strategies:
+      
+      1. Whitelist allowed fields:
+        const allowedFields = ['username', 'email', 'age'];
+        const userData = {};
+        allowedFields.forEach(field => {
+          if (req.body[field] !== undefined) {
+            userData[field] = req.body[field];
+          }
+        });
+        await User.create(userData);
+      
+      2. Use destructuring:
+        const { username, email, age } = req.body;
+        await User.create({ username, email, age });
+      
+      3. Model-level protection (Sequelize):
+        User.init({
+          username: DataTypes.STRING,
+          email: DataTypes.STRING,
+          role: {
+            type: DataTypes.STRING,
+            defaultValue: 'user',
+            // Prevent mass assignment
+            allowNull: false
+          }
+        });
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-915: Mass Assignment"
+      owasp: "A01:2021 - Broken Access Control"
+
+  - id: unvalidated-redirect
+    patterns:
+      - pattern-either:
+          - pattern: res.redirect($REQ.query.$FIELD)
+          - pattern: res.redirect($REQ.params.$FIELD)
+          - pattern: res.redirect($REQ.body.$FIELD)
+      - pattern-not-inside: |
+          if ($URL.startsWith("/")) { ... }
+      - pattern-not-inside: |
+          if (isValidUrl($URL)) { ... }
+    message: |
+      Unvalidated redirect using user input.
+      
+      Attackers can redirect users to phishing sites or malicious content.
+      
+      Attack example:
+        GET /redirect?url=http://evil.com/fake-login
+      
+      Secure implementation:
+        const allowedDomains = ['yoursite.com', 'partner.com'];
+        
+        app.get('/redirect', (req, res) => {
+          const redirectUrl = req.query.url;
+          
+          // Option 1: Only allow relative URLs
+          if (redirectUrl.startsWith('/')) {
+            return res.redirect(redirectUrl);
+          }
+          
+          // Option 2: Whitelist domains
+          try {
+            const url = new URL(redirectUrl);
+            if (allowedDomains.includes(url.hostname)) {
+              return res.redirect(redirectUrl);
+            }
+          } catch (e) {
+            // Invalid URL
+          }
+          
+          return res.status(400).json({ error: 'Invalid redirect URL' });
+        });
+    severity: WARNING
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-601: URL Redirection to Untrusted Site"
+      owasp: "A01:2021 - Broken Access Control"
+
+  - id: server-side-request-forgery
+    patterns:
+      - pattern-either:
+          - pattern: axios.get($REQ.query.$FIELD)
+          - pattern: axios.get($REQ.body.$FIELD)
+          - pattern: fetch($REQ.query.$FIELD)
+          - pattern: fetch($REQ.body.$FIELD)
+          - pattern: request($REQ.query.$FIELD)
+          - pattern: request($REQ.body.$FIELD)
+      - pattern-not-inside: |
+          if (isValidUrl($URL)) { ... }
+      - pattern-not-inside: |
+          if ($URL.startsWith("https://api.yourdomain.com")) { ... }
+    message: |
+      Server-Side Request Forgery (SSRF) vulnerability.
+      
+      User-controlled URL in server-side HTTP request allows attackers to:
+      - Access internal services (localhost, 127.0.0.1, internal IPs)
+      - Port scan internal network
+      - Read cloud metadata endpoints (e.g., AWS 169.254.169.254)
+      - Bypass firewalls
+      
+      Attack examples:
+        POST /fetch-url
+        { "url": "http://localhost:6379" }  // Access Redis
+        { "url": "http://169.254.169.254/latest/meta-data/" }  // AWS metadata
+      
+      Mitigation:
+        const isPrivateIP = require('is-private-ip');
+        const { URL } = require('url');
+        
+        function validateUrl(userUrl) {
+          const allowedDomains = ['api.trusted.com'];
+          
+          try {
+            const url = new URL(userUrl);
+            
+            // Block private/local IPs
+            const ip = url.hostname;
+            if (isPrivateIP(ip) || ip === 'localhost') {
+              return false;
+            }
+            
+            // Whitelist domains
+            if (!allowedDomains.includes(url.hostname)) {
+              return false;
+            }
+            
+            // Only allow HTTP/HTTPS
+            if (!['http:', 'https:'].includes(url.protocol)) {
+              return false;
+            }
+            
+            return true;
+          } catch (e) {
+            return false;
+          }
+        }
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-918: Server-Side Request Forgery"
+      owasp: "A10:2021 - Server-Side Request Forgery"
+
+  - id: xml-external-entity-injection
+    patterns:
+      - pattern-either:
+          - pattern: |
+              libxmljs.parseXml($DATA)
+          - pattern: |
+              new DOMParser().parseFromString($DATA, "text/xml")
+      - pattern-not-inside: |
+          libxmljs.parseXml($DATA, { noent: false })
+    message: |
+      XML parser without XXE protection.
+      
+      XML External Entity (XXE) attacks can:
+      - Read local files
+      - Perform SSRF
+      - Cause denial of service
+      
+      Attack payload:
+        <?xml version="1.0"?>
+        <!DOCTYPE foo [
+          <!ENTITY xxe SYSTEM "file:///etc/passwd">
+        ]>
+        <root>&xxe;</root>
+      
+      Secure XML parsing:
+        const libxmljs = require('libxmljs');
+        
+        const doc = libxmljs.parseXml(xmlString, {
+          noent: false,    // Disable entity expansion
+          dtdload: false,  // Disable DTD loading
+          doctype: false   // Disable DOCTYPE
+        });
+      
+      Better: Use JSON instead of XML when possible.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-611: XML External Entity Reference"
+      owasp: "A05:2021 - Security Misconfiguration"
+
+  - id: deserialization-vulnerability
+    patterns:
+      - pattern-either:
+          - pattern: eval($REQ.body.$FIELD)
+          - pattern: Function($REQ.body.$FIELD)
+          - pattern: vm.runInNewContext($REQ.body.$FIELD)
+          - pattern: JSON.parse($REQ.body.$FIELD)
+    message: |
+      Unsafe deserialization of user input.
+      
+      Deserializing untrusted data can lead to:
+      - Remote code execution
+      - Prototype pollution
+      - Application crash
+      
+      For JSON.parse():
+      - Validate structure after parsing
+      - Use JSON schema validation
+      - Sanitize nested objects
+      
+      Never use:
+        eval(userInput)
+        Function(userInput)
+        vm.runInNewContext(userInput)
+      
+      Secure JSON parsing:
+        const Ajv = require('ajv');
+        const ajv = new Ajv();
+        
+        const schema = {
+          type: 'object',
+          properties: {
+            username: { type: 'string' },
+            age: { type: 'number' }
+          },
+          required: ['username'],
+          additionalProperties: false
+        };
+        
+        const validate = ajv.compile(schema);
+        
+        try {
+          const data = JSON.parse(req.body.data);
+          if (!validate(data)) {
+            return res.status(400).json({ errors: validate.errors });
+          }
+          // Safe to use data
+        } catch (e) {
+          return res.status(400).json({ error: 'Invalid JSON' });
+        }
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      cwe: "CWE-502: Deserialization of Untrusted Data"
+      owasp: "A08:2021 - Software and Data Integrity Failures"

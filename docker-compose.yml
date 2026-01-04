@@ -1,0 +1,132 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: owasp-lab-db
+    environment:
+      POSTGRES_DB: owasp_lab
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/setup-db.sql:/docker-entrypoint-initdb.d/setup.sql
+    networks:
+      - owasp-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app-vulnerable:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: vulnerable
+    container_name: owasp-lab-vulnerable
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/owasp_lab
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./src:/app/src
+      - ./package.json:/app/package.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - owasp-network
+    command: npm run dev
+
+  app-secure:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: secure
+    container_name: owasp-lab-secure
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/owasp_lab
+      PORT: 3001
+      JWT_SECRET: secure-jwt-secret-change-in-production
+      BCRYPT_ROUNDS: 12
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./src:/app/src:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - owasp-network
+    command: npm start
+
+  owasp-zap:
+    image: owasp/zap2docker-stable
+    container_name: owasp-lab-zap
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./zap-reports:/zap/wrk
+    networks:
+      - owasp-network
+    command: >
+      zap-webswing.sh
+
+  semgrep:
+    image: returntocorp/semgrep
+    container_name: owasp-lab-semgrep
+    volumes:
+      - ./src:/src:ro
+      - ./.semgrep.yml:/semgrep.yml:ro
+      - ./security-reports:/reports
+    networks:
+      - owasp-network
+    command: >
+      semgrep scan /src
+      --config=/semgrep.yml
+      --config=auto
+      --json
+      --output=/reports/semgrep-report.json
+
+  sonarqube:
+    image: sonarqube:community
+    container_name: owasp-lab-sonarqube
+    environment:
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: true
+    ports:
+      - "9000:9000"
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+    networks:
+      - owasp-network
+
+  portainer:
+    image: portainer/portainer-ce
+    container_name: owasp-lab-portainer
+    ports:
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - owasp-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:
+  portainer_data:
+
+networks:
+  owasp-network:
+    driver: bridge

@@ -1,0 +1,33 @@
+version: v1
+
+rules_file:
+  - semgrep-rules.yml
+  - semgrep-advanced.yml
+
+exclude:
+  - node_modules/
+  - dist/
+  - build/
+  - coverage/
+  - .git/
+  - '*.test.js'
+  - '*.spec.js'
+  - '*.min.js'
+
+autofix: false
+
+max_memory: 8000
+
+max_target_bytes: 5000000
+
+timeout: 30
+
+timeout_threshold: 3
+
+jobs: 4
+
+output_format: json
+
+output_file: semgrep-results.json
+
+metrics: off

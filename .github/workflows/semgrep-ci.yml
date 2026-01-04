@@ -1,0 +1,245 @@
+name: Semgrep Security Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  semgrep:
+    name: Scan with Semgrep
+    runs-on: ubuntu-latest
+    
+    container:
+      image: returntocorp/semgrep
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Run custom rules
+        id: custom-scan
+        run: |
+          semgrep scan \
+            --config semgrep-rules.yml \
+            --config semgrep-advanced.yml \
+            --json \
+            --output custom-results.json \
+            --metrics=off
+        continue-on-error: true
+      
+      - name: Run OWASP Top 10 scan
+        id: owasp-scan
+        run: |
+          semgrep scan \
+            --config "p/owasp-top-ten" \
+            --json \
+            --output owasp-results.json \
+            --metrics=off
+        continue-on-error: true
+      
+      - name: Run security audit
+        id: security-scan
+        run: |
+          semgrep scan \
+            --config "p/security-audit" \
+            --json \
+            --output security-results.json \
+            --metrics=off
+        continue-on-error: true
+      
+      - name: Generate SARIF for GitHub Security
+        run: |
+          semgrep scan \
+            --config semgrep-rules.yml \
+            --config semgrep-advanced.yml \
+            --config "p/owasp-top-ten" \
+            --sarif \
+            --output semgrep.sarif \
+            --metrics=off
+        continue-on-error: true
+      
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+      
+      - name: Setup Node.js for report generation
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Parse and analyze results
+        if: always()
+        run: |
+          node scripts/parse-semgrep-results.js custom-results.json
+      
+      - name: Upload scan results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: semgrep-results
+          path: |
+            custom-results.json
+            owasp-results.json
+            security-results.json
+            semgrep.sarif
+            security-reports/
+      
+      - name: Check for blocking issues
+        run: |
+          CRITICAL_COUNT=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' custom-results.json)
+          echo "Critical issues found: $CRITICAL_COUNT"
+          
+          if [ "$CRITICAL_COUNT" -gt 0 ]; then
+            echo "::error::Found $CRITICAL_COUNT critical security issues"
+            echo "Review the security report in the artifacts"
+            exit 1
+          fi
+      
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('custom-results.json', 'utf8'));
+            const findings = results.results || [];
+            
+            const critical = findings.filter(f => f.extra?.severity === 'ERROR').length;
+            const high = findings.filter(f => f.extra?.severity === 'WARNING').length;
+            const total = findings.length;
+            
+            let body = '## Security Scan Results\n\n';
+            body += `- Total Findings: ${total}\n`;
+            body += `- Critical: ${critical}\n`;
+            body += `- High: ${high}\n\n`;
+            
+            if (critical > 0) {
+              body += '### Critical Issues Found\n\n';
+              findings
+                .filter(f => f.extra?.severity === 'ERROR')
+                .slice(0, 3)
+                .forEach(f => {
+                  body += `- **${f.check_id}** in \`${f.path}:${f.start.line}\`\n`;
+                });
+              
+              if (critical > 3) {
+                body += `\n_...and ${critical - 3} more critical issues_\n`;
+              }
+            }
+            
+            body += '\n[View full report in workflow artifacts]';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  semgrep-diff:
+    name: Incremental Scan (Changed Files Only)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    container:
+      image: returntocorp/semgrep
+    
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Get changed files
+        id: changed-files
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '\.(js|ts)$' || true)
+          echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+      
+      - name: Scan changed files
+        if: steps.changed-files.outputs.files != ''
+        run: |
+          echo "Scanning changed files:"
+          echo "${{ steps.changed-files.outputs.files }}"
+          
+          semgrep scan \
+            --config semgrep-rules.yml \
+            --config semgrep-advanced.yml \
+            --json \
+            --output diff-results.json \
+            ${{ steps.changed-files.outputs.files }}
+        continue-on-error: true
+      
+      - name: Report diff results
+        if: steps.changed-files.outputs.files != ''
+        run: |
+          if [ -f diff-results.json ]; then
+            FINDINGS=$(jq '.results | length' diff-results.json)
+            echo "Found $FINDINGS issues in changed files"
+          fi
+
+  baseline-comparison:
+    name: Compare Against Baseline
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    container:
+      image: returntocorp/semgrep
+    
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v3
+      
+      - name: Scan PR branch
+        run: |
+          semgrep scan \
+            --config semgrep-rules.yml \
+            --json \
+            --output pr-results.json \
+            --metrics=off
+        continue-on-error: true
+      
+      - name: Checkout base branch
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.base_ref }}
+      
+      - name: Scan base branch
+        run: |
+          semgrep scan \
+            --config semgrep-rules.yml \
+            --json \
+            --output base-results.json \
+            --metrics=off
+        continue-on-error: true
+      
+      - name: Compare results
+        run: |
+          PR_COUNT=$(jq '.results | length' pr-results.json)
+          BASE_COUNT=$(jq '.results | length' base-results.json)
+          DIFF=$((PR_COUNT - BASE_COUNT))
+          
+          echo "Base branch findings: $BASE_COUNT"
+          echo "PR branch findings: $PR_COUNT"
+          echo "Difference: $DIFF"
+          
+          if [ "$DIFF" -gt 0 ]; then
+            echo "::warning::This PR introduces $DIFF new security findings"
+          fi 
+          

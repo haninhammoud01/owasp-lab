@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OWASP Security Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            color: #666;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            background: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+        }
+        
+        .stat-card.critical::before {
+            background: #dc3545;
+        }
+        
+        .stat-card.high::before {
+            background: #fd7e14;
+        }
+        
+        .stat-card.medium::before {
+            background: #ffc107;
+        }
+        
+        .stat-card.low::before {
+            background: #28a745;
+        }
+        
+        .stat-label {
+            font-size: 14px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+        
+        .stat-value {
+            font-size: 36px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .stat-change {
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .chart-card {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .chart-card h3 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+        
+        .findings-table {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .findings-table h3 {
+            padding: 25px;
+            color: #333;
+            border-bottom: 1px solid #eee;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        thead {
+            background: #f8f9fa;
+        }
+        
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            color: #666;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        td {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            color: #333;
+        }
+        
+        tr:last-child td {
+            border-bottom: none;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .badge-critical {
+            background: #fee;
+            color: #dc3545;
+        }
+        
+        .badge-high {
+            background: #fff3e0;
+            color: #fd7e14;
+        }
+        
+        .badge-medium {
+            background: #fff9e6;
+            color: #ffc107;
+        }
+        
+        .badge-low {
+            background: #e8f5e9;
+            color: #28a745;
+        }
+        
+        .code-preview {
+            background: #282c34;
+            color: #abb2bf;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+            margin-top: 10px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: white;
+        }
+        
+        .trend-up {
+            color: #dc3545;
+        }
+        
+        .trend-down {
+            color: #28a745;
+        }
+        
+        .filter-bar {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .filter-bar label {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .filter-bar select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>OWASP Security Dashboard</h1>
+            <p>Real-time security vulnerability monitoring and analysis</p>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-primary" onclick="loadData()">Refresh Data</button>
+            <button class="btn" onclick="exportReport()">Export Report</button>
+            <button class="btn" onclick="runScan()">Run New Scan</button>
+        </div>
+        
+        <div class="filter-bar">
+            <label>Filter by Severity:</label>
+            <select id="severityFilter" onchange="applyFilters()">
+                <option value="all">All Severities</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+            </select>
+            
+            <label>Filter by Category:</label>
+            <select id="categoryFilter" onchange="applyFilters()">
+                <option value="all">All Categories</option>
+                <option value="injection">Injection</option>
+                <option value="xss">XSS</option>
+                <option value="auth">Authentication</option>
+                <option value="crypto">Cryptography</option>
+            </select>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card critical">
+                <div class="stat-label">Critical Issues</div>
+                <div class="stat-value" id="criticalCount">0</div>
+                <div class="stat-change" id="criticalTrend">No change from last scan</div>
+            </div>
+            <div class="stat-card high">
+                <div class="stat-label">High Issues</div>
+                <div class="stat-value" id="highCount">0</div>
+                <div class="stat-change" id="highTrend">No change from last scan</div>
+            </div>
+            <div class="stat-card medium">
+                <div class="stat-label">Medium Issues</div>
+                <div class="stat-value" id="mediumCount">0</div>
+                <div class="stat-change" id="mediumTrend">No change from last scan</div>
+            </div>
+            <div class="stat-card low">
+                <div class="stat-label">Total Scanned Files</div>
+                <div class="stat-value" id="filesCount">0</div>
+                <div class="stat-change" id="lastScan">Never scanned</div>
+            </div>
+        </div>
+        
+        <div class="charts-grid">
+            <div class="chart-card">
+                <h3>Vulnerabilities by Severity</h3>
+                <canvas id="severityChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>OWASP Top 10 Distribution</h3>
+                <canvas id="owaspChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Trends Over Time</h3>
+                <canvas id="trendChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Most Affected Files</h3>
+                <canvas id="filesChart"></canvas>
+            </div>
+        </div>
+        
+        <div class="findings-table">
+            <h3>Recent Findings</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Severity</th>
+                        <th>Type</th>
+                        <th>File</th>
+                        <th>Line</th>
+                        <th>CWE</th>
+                        <th>OWASP</th>
+                    </tr>
+                </thead>
+                <tbody id="findingsBody">
+                    <tr>
+                        <td colspan="6" style="text-align: center; padding: 40px; color: #999;">
+                            No data loaded. Click "Refresh Data" to load security findings.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <script>
+        let charts = {};
+        let allFindings = [];
+        
+        function generateMockData() {
+            return {
+                summary: {
+                    total: 45,
+                    critical: 8,
+                    high: 15,
+                    medium: 18,
+                    low: 4,
+                    filesScanned: 127,
+                    lastScan: new Date().toISOString()
+                },
+                owaspDistribution: {
+                    'A01:2021': 5,
+                    'A02:2021': 8,
+                    'A03:2021': 12,
+                    'A04:2021': 3,
+                    'A05:2021': 7,
+                    'A06:2021': 4,
+                    'A07:2021': 6
+                },
+                trends: {
+                    labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+                    critical: [12, 10, 9, 8],
+                    high: [18, 16, 15, 15],
+                    medium: [22, 20, 19, 18]
+                },
+                topFiles: {
+                    'src/vulnerable/v1-injection.js': 8,
+                    'src/vulnerable/v2-auth.js': 6,
+                    'src/vulnerable/v3-xss.js': 5,
+                    'src/routes/user.js': 4,
+                    'src/controllers/auth.js': 3
+                },
+                findings: [
+                    {
+                        severity: 'critical',
+                        type: 'SQL Injection',
+                        file: 'src/vulnerable/v1-injection.js',
+                        line: 23,
+                        cwe: 'CWE-89',
+                        owasp: 'A03:2021',
+                        code: 'const query = `SELECT * FROM users WHERE id = ${userId}`;'
+                    },
+                    {
+                        severity: 'critical',
+                        type: 'Command Injection',
+                        file: 'src/routes/admin.js',
+                        line: 45,
+                        cwe: 'CWE-78',
+                        owasp: 'A03:2021',
+                        code: 'exec(`ls ${userInput}`)'
+                    },
+                    {
+                        severity: 'high',
+                        type: 'XSS',
+                        file: 'src/vulnerable/v3-xss.js',
+                        line: 15,
+                        cwe: 'CWE-79',
+                        owasp: 'A03:2021',
+                        code: 'res.send(`<h1>${searchTerm}</h1>`)'
+                    },
+                    {
+                        severity: 'high',
+                        type: 'Hardcoded Secret',
+                        file: 'src/config/jwt.js',
+                        line: 8,
+                        cwe: 'CWE-798',
+                        owasp: 'A07:2021',
+                        code: 'const secret = "hardcoded-secret-key";'
+                    },
+                    {
+                        severity: 'medium',
+                        type: 'Weak Crypto',
+                        file: 'src/utils/hash.js',
+                        line: 12,
+                        cwe: 'CWE-327',
+                        owasp: 'A02:2021',
+                        code: 'crypto.createHash("md5")'
+                    }
+                ]
+            };
+        }
+        
+        function loadData() {
+            const data = generateMockData();
+            allFindings = data.findings;
+            updateStats(data.summary);
+            createCharts(data);
+            displayFindings(data.findings);
+        }
+        
+        function updateStats(summary) {
+            document.getElementById('criticalCount').textContent = summary.critical;
+            document.getElementById('highCount').textContent = summary.high;
+            document.getElementById('mediumCount').textContent = summary.medium;
+            document.getElementById('filesCount').textContent = summary.filesScanned;
+            
+            const lastScanDate = new Date(summary.lastScan);
+            document.getElementById('lastScan').textContent = 
+                'Last scan: ' + lastScanDate.toLocaleString();
+        }
+        
+        function createCharts(data) {
+            if (charts.severity) charts.severity.destroy();
+            if (charts.owasp) charts.owasp.destroy();
+            if (charts.trend) charts.trend.destroy();
+            if (charts.files) charts.files.destroy();
+            
+            const ctxSeverity = document.getElementById('severityChart').getContext('2d');
+            charts.severity = new Chart(ctxSeverity, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Critical', 'High', 'Medium', 'Low'],
+                    datasets: [{
+                        data: [
+                            data.summary.critical,
+                            data.summary.high,
+                            data.summary.medium,
+                            data.summary.low
+                        ],
+                        backgroundColor: ['#dc3545', '#fd7e14', '#ffc107', '#28a745']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true
+                }
+            });
+            
+            const ctxOwasp = document.getElementById('owaspChart').getContext('2d');
+            charts.owasp = new Chart(ctxOwasp, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(data.owaspDistribution),
+                    datasets: [{
+                        label: 'Findings',
+                        data: Object.values(data.owaspDistribution),
+                        backgroundColor: '#667eea'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+            
+            const ctxTrend = document.getElementById('trendChart').getContext('2d');
+            charts.trend = new Chart(ctxTrend, {
+                type: 'line',
+                data: {
+                    labels: data.trends.labels,
+                    datasets: [
+                        {
+                            label: 'Critical',
+                            data: data.trends.critical,
+                            borderColor: '#dc3545',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'High',
+                            data: data.trends.high,
+                            borderColor: '#fd7e14',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Medium',
+                            data: data.trends.medium,
+                            borderColor: '#ffc107',
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true
+                }
+            });
+            
+            const ctxFiles = document.getElementById('filesChart').getContext('2d');
+            charts.files = new Chart(ctxFiles, {
+                type: 'horizontalBar',
+                data: {
+                    labels: Object.keys(data.topFiles),
+                    datasets: [{
+                        label: 'Issues',
+                        data: Object.values(data.topFiles),
+                        backgroundColor: '#764ba2'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    indexAxis: 'y'
+                }
+            });
+        }
+        
+        function displayFindings(findings) {
+            const tbody = document.getElementById('findingsBody');
+            tbody.innerHTML = '';
+            
+            findings.forEach(finding => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><span class="badge badge-${finding.severity}">${finding.severity}</span></td>
+                    <td>${finding.type}</td>
+                    <td>${finding.file}</td>
+                    <td>${finding.line}</td>
+                    <td>${finding.cwe}</td>
+                    <td>${finding.owasp}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        function applyFilters() {
+            const severityFilter = document.getElementById('severityFilter').value;
+            const categoryFilter = document.getElementById('categoryFilter').value;
+            
+            let filtered = allFindings;
+            
+            if (severityFilter !== 'all') {
+                filtered = filtered.filter(f => f.severity === severityFilter);
+            }
+            
+            displayFindings(filtered);
+        }
+        
+        function exportReport() {
+            alert('Exporting report... (This would generate a PDF/Excel in production)');
+        }
+        
+        function runScan() {
+            alert('Starting new security scan... (This would trigger Semgrep in production)');
+        }
+        
+        loadData();
+    </script>
+</body>
+</html>
