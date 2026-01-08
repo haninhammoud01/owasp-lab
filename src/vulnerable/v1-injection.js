@@ -1,3 +1,8 @@
+// intentionally vulnerable ORM model (lab only)
+const User = {
+  findOne: async () => null
+};
+
 const express = require('express');
 const { Pool } = require('pg');
 const router = express.Router();

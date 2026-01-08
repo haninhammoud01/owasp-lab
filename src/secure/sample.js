@@ -1,3 +1,11 @@
+const fs = require("fs");
+const DOMPurify = require("dompurify")(new (require("jsdom").JSDOM)().window);
+
+// mock database connection (intentional for lab)
+const db = {
+  query: async () => []
+};
+
 const express = require('express');
 const router = express.Router();
 const { body, query, validationResult } = require('express-validator');

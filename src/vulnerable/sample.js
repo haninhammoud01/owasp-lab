@@ -1,3 +1,10 @@
+const fs = require("fs");
+
+// intentionally unsafe mock DB for OWASP lab
+const db = {
+  query: async () => []
+};
+
 const express = require('express');
 const router = express.Router();
 
