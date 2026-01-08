@@ -1,0 +1,20 @@
+{
+  "vulnerabilities": {
+    "critical": [],
+    "high": [],
+    "medium": []
+  },
+  "policy": {
+    "max_high_severity": 5,
+    "min_coverage": 80,
+    "max_complexity": 10
+  },
+  "code_quality": {
+    "coverage": 85,
+    "complexity": 8
+  },
+  "tests": {
+    "passed": 50,
+    "total": 50
+  }
+}
