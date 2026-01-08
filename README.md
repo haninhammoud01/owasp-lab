@@ -81,7 +81,7 @@ This project provides a comprehensive security testing environment that demonstr
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/owasp-top10-lab.git
+git clone https://github.com/haninhammoud01/owasp-top10-lab.git
 
 # Install dependencies
 npm install
@@ -117,31 +117,6 @@ docker-compose logs -f app-vulnerable
 
 # Stop all services
 docker-compose down
-```
-
-## Project Structure
-
-```
-owasp-top10-lab/
-├── src/
-│   ├── config/              # Application configuration
-│   ├── middleware/          # Security middleware
-│   ├── routes/              # API route handlers
-│   ├── controllers/         # Business logic
-│   ├── models/              # Data models
-│   ├── vulnerable/          # Intentionally vulnerable code
-│   └── secure/              # Secure implementations
-├── tests/
-│   ├── unit/                # Unit tests
-│   ├── integration/         # Integration tests
-│   └── security/            # Security-specific tests
-├── docs/
-│   ├── vulnerabilities/     # Vulnerability documentation
-│   ├── mitigations/         # Mitigation strategies
-│   └── threat-models/       # Threat modeling documents
-├── scripts/                 # Utility scripts
-└── .github/
-    └── workflows/           # CI/CD pipelines
 ```
 
 ## Implemented Vulnerabilities
@@ -217,15 +192,6 @@ The project includes GitHub Actions workflows for automated security scanning:
 - **Container Scanning**: Trivy for Docker images
 - **DAST**: OWASP ZAP baseline scans
 
-## Documentation
-
-Detailed documentation available in `/docs`:
-
-- [Vulnerability Analysis](docs/vulnerabilities/README.md)
-- [Mitigation Strategies](docs/mitigations/README.md)
-- [Threat Models](docs/threat-models/README.md)
-- [Security Architecture](docs/architecture.md)
-
 ## Learning Path
 
 ### Phase 1: Understanding Vulnerabilities
@@ -256,21 +222,10 @@ Detailed documentation available in `/docs`:
 - Advanced behavioral analysis
 - Cloud-native security controls
 
-## Contributing
-
-Security contributions are welcome. Please review our [Security Policy](SECURITY.md) before submitting.
-
-## Disclaimer
-
-This project contains intentionally vulnerable code for educational purposes only. Never deploy vulnerable implementations to production environments. The vulnerable code is isolated and should only be run in controlled, isolated environments.
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
 ## References
 
 - [OWASP Top 10 2021](https://owasp.org/www-project-top-ten/)
 - [CWE Top 25](https://cwe.mitre.org/top25/)
 - [NIST Secure Software Development Framework](https://csrc.nist.gov/Projects/ssdf)
 - [SANS Secure Coding Guidelines](https://www.sans.org/secure-coding/)
+
